@@ -1,0 +1,15 @@
+{
+  "name": "loser",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Every round, the wallet that lost the most trading the coin wins the creator fees.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "demo": "DEMO=1 node server.js",
+    "test": "node test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

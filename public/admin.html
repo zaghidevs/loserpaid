@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>loser admin</title>
+<style>
+  :root{--bg:#050505;--panel:rgba(255,255,255,.05);--line:#26262a;--ink:#f3f1ea;--dim:#8b8a86;--red:#ededed;--green:#ededed;--gold:#ededed}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,Inter,system-ui,sans-serif;margin:0;padding:24px 16px}
+  main{max-width:820px;margin:0 auto}
+  h1{font-size:20px} h2{font-size:15px;margin-top:28px;color:var(--dim)}
+  input,button{font:inherit;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  button{cursor:pointer} button.go{border-color:var(--green);color:var(--green)}
+  .row{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin:10px 0;display:grid;gap:8px}
+  .w{word-break:break-all} .amt{color:var(--gold);font-size:18px} .dim{color:var(--dim)}
+  .line{display:flex;gap:8px;flex-wrap:wrap} .line input{flex:1;min-width:200px}
+  #msg{color:var(--red)}
+</style>
+</head>
+<body>
+<main>
+  <h1>loser admin</h1>
+  <div class="line"><input id="key" type="password" placeholder="Admin key"><button onclick="saveKey()">Unlock</button></div>
+  <p id="msg"></p>
+
+  <h2>Launch status</h2>
+  <div class="row" id="status"><span class="dim">Enter your admin key.</span></div>
+
+  <h2>Unpaid winners — send the SOL from your creator wallet, then paste the tx signature</h2>
+  <div id="unpaid" class="dim">Enter your admin key.</div>
+
+  <h2>Banned wallets (excluded from the leaderboard)</h2>
+  <div class="line"><input id="ban" placeholder="Wallet address"><button onclick="ban()">Ban</button></div>
+  <div id="banned" class="dim"></div>
+
+  <h2>Reset (after a rehearsal)</h2>
+  <p class="dim">Wipes the tracked coin, rounds and winners, and goes back to waiting for launch. Type RESET to confirm.</p>
+  <div class="line"><input id="resetConfirm" placeholder="Type RESET"><button onclick="reset()">Reset everything</button></div>
+  <p id="resetMsg" class="dim"></p>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let key = sessionStorageGet();
+function sessionStorageGet() { try { return sessionStorage.getItem("k") || ""; } catch { return ""; } }
+function saveKey() { key = $("key").value.trim(); try { sessionStorage.setItem("k", key); } catch {} load(); }
+
+async function api(p, body) {
+  const res = await fetch("/api/admin/" + p, {
+    method: body ? "POST" : "GET",
+    headers: { "x-admin-key": key, "content-type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await res.json();
+  if (!res.ok) throw new Error(j.error || res.status);
+  return j;
+}
+
+async function load() {
+  if (!key) return;
+  try {
+    const s = await api("state");
+    $("msg").textContent = "";
+    $("status").innerHTML = s.mint
+      ? `<div class="amt">${s.test ? "Rehearsal: tracking someone else's coin" : "Live: tracking your coin"}</div>
+         <div class="dim">${esc((s.coin && (s.coin.name || "") + " " + (s.coin.symbol ? "(" + s.coin.symbol + ")" : "")) || "")}</div>
+         <div class="w">${esc(s.mint)}</div>
+         <div class="dim">detected ${s.launchAt ? new Date(s.launchAt).toLocaleString() : "(set by MINT)"} · feed: ${esc(s.feed)}</div>`
+      : `<div class="amt">Waiting for launch</div>
+         <div class="dim">watching: ${esc(s.watching)} · feed: ${esc(s.feed)}</div>
+         <div class="dim">The site locks on automatically the moment that wallet creates a coin on pump.fun.</div>`;
+    $("unpaid").innerHTML = s.unpaid.length ? s.unpaid.map((w) => `
+      <div class="row">
+        <div class="dim">${new Date(w.start).toLocaleString()} · lost ${w.loss.toFixed(3)} SOL</div>
+        <div class="amt">Send ${w.payout.toFixed(4)} SOL</div>
+        <div class="line"><span class="w">${esc(w.wallet)}</span> <button onclick="navigator.clipboard.writeText('${esc(w.wallet)}')">copy</button></div>
+        <div class="line"><input id="tx${w.id}" placeholder="Transaction signature"><button class="go" onclick="paid(${w.id})">Mark paid</button></div>
+      </div>`).join("") : "Nothing to pay right now.";
+    $("banned").innerHTML = s.banned.length ? s.banned.map((b) => `<div class="line" style="margin-top:8px"><span class="w">${esc(b)}</span><button onclick="unban('${esc(b)}')">unban</button></div>`).join("") : "None.";
+  } catch (e) { $("msg").textContent = e.message; }
+}
+async function paid(id) {
+  const tx = $("tx" + id).value.trim();
+  if (!tx) { $("msg").textContent = "Paste the transaction signature first."; return; }
+  await api("paid", { id, tx }); load();
+}
+async function ban() { const w = $("ban").value.trim(); if (w) { await api("ban", { wallet: w }); $("ban").value = ""; load(); } }
+async function unban(w) { await api("ban", { unban: w }); load(); }
+async function reset() {
+  if ($("resetConfirm").value.trim() !== "RESET") { $("resetMsg").textContent = "Type RESET in the box first."; return; }
+  try { await api("reset", { confirm: "RESET" }); $("resetConfirm").value = ""; $("resetMsg").textContent = "Reset done. Waiting for launch again."; load(); }
+  catch (e) { $("resetMsg").textContent = e.message; }
+}
+if (key) { $("key").value = key; load(); }
+setInterval(load, 15000);
+</script>
+</body>
+</html>
